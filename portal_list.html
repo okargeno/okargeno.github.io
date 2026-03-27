@@ -1,0 +1,121 @@
+layout: page
+title: "Aardwolf Portals"
+permalink: /portals.html
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Portals</title>
+  <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css" />
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+    h1 { margin: 0 0 12px; font-size: 20px; }
+    .hint { margin: 0 0 16px; color: #444; }
+    #portals thead th { vertical-align: bottom; }
+    #portals thead th .col-filter {
+      margin-top: 6px;
+      width: 100%;
+      max-width: 420px;
+      font-size: 12px;
+    }
+  </style>
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+</head>
+<body>
+  <h1>Portals</h1>
+  <p class="hint">Use the dropdowns to filter each column, or the search box for global filtering.</p>
+  <table id="portals" class="display" style="width:100%">
+    <thead>
+      <tr>
+        <th>
+          Level<br />
+          <select class="col-filter" data-col="0" data-mode="exact">
+            <option value="">All</option>
+          </select>
+        </th>
+        <th>
+          Portals<br />
+          <select class="col-filter" data-col="1" data-mode="contains">
+            <option value="">All</option>
+          </select>
+        </th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <script>
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+    function escapeRegex(s) {
+      return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+    async function main() {
+      const res = await fetch('./portals.json', { cache: 'no-store' });
+      if (!res.ok) throw new Error(`Failed to load portals.json (${res.status})`);
+      const data = await res.json();
+      const tbody = document.querySelector('#portals tbody');
+      tbody.innerHTML = data.map(row =>
+        `<tr><td>${escapeHtml(row.level)}</td><td>${escapeHtml(row.portal)}</td></tr>`
+      ).join('');
+      $('#portals').DataTable({
+        order: [[0, 'asc']],
+        pageLength: 25,
+        columnDefs: [{
+          targets: 0,
+          render: function (data, type) {
+            const n = parseInt(data, 10);
+            return (type === 'sort' || type === 'type') && !isNaN(n) ? n : data;
+          }
+        }],
+        initComplete: function () {
+          const api = this.api();
+          api.columns().every(function () {
+            const col = this;
+            const idx = col.index();
+            const select = document.querySelector(`select.col-filter[data-col="${idx}"]`);
+            if (!select) return;
+            const mode = select.getAttribute('data-mode') || 'exact';
+            // Build unique option list from full column data
+            const values = new Set(col.data().toArray().map(v => String(v)));
+            const sorted = Array.from(values).sort((a, b) => {
+              if (idx === 0) return (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0);
+              return a.localeCompare(b);
+            });
+            for (const v of sorted) {
+              const opt = document.createElement('option');
+              opt.value = v;
+              opt.textContent = v;
+              select.appendChild(opt);
+            }
+            select.addEventListener('change', () => {
+              const val = select.value;
+              if (!val) {
+                col.search('').draw();
+                return;
+              }
+              if (mode === 'contains') {
+                // regex=false => treat as plain substring match
+                col.search(val, false, true).draw();
+              } else {
+                col.search('^' + escapeRegex(val) + '$', true, false).draw();
+              }
+            });
+          });
+        }
+      });
+    }
+    main().catch(err => {
+      document.body.insertAdjacentHTML('beforeend', `<pre>${escapeHtml(err.stack || err)}</pre>`);
+    });
+  </script>
+</body>
+</html>
