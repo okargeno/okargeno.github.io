@@ -4,37 +4,53 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Portals</title>
+
   <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" />
+
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
     h1 { margin: 0 0 12px; font-size: 20px; }
-    .hint { margin: 0 0 16px; color: #444; }
+    .hint { margin: 0 0 10px; color: #444; }
+    #status { margin: 0 0 16px; font-size: 12px; color: #444; }
+
     #portals thead th { vertical-align: bottom; }
     #portals thead th .col-filter {
       margin-top: 6px;
       width: 100%;
-      max-width: 420px;
+      max-width: 520px;
       font-size: 12px;
     }
+
+    /* Make Select2 match table header width */
+    .select2-container { width: 100% !important; }
+    .select2-container .select2-selection--single { height: 28px; }
+    .select2-container--default .select2-selection--single .select2-selection__rendered { line-height: 26px; }
+    .select2-container--default .select2-selection--single .select2-selection__arrow { height: 26px; }
   </style>
+
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 </head>
+
 <body>
   <h1>Portals</h1>
-  <p class="hint">Use the dropdowns to filter each column, or the search box for global filtering.</p>
+  <p class="hint">Use the dropdowns to filter each column. The “Portals” filter is type-searchable and filters by contains-text.</p>
+  <div id="status">Loading…</div>
+
   <table id="portals" class="display" style="width:100%">
     <thead>
       <tr>
         <th>
           Level<br />
-          <select class="col-filter" data-col="0" data-mode="exact">
+          <select class="col-filter" id="filter-level">
             <option value="">All</option>
           </select>
         </th>
         <th>
-          Portals<br />
-          <select class="col-filter" data-col="1" data-mode="contains">
+          Portals (contains)<br />
+          <select class="col-filter" id="filter-portals">
             <option value="">All</option>
           </select>
         </th>
@@ -42,6 +58,7 @@
     </thead>
     <tbody></tbody>
   </table>
+
   <script>
     function escapeHtml(s) {
       return String(s)
@@ -51,18 +68,31 @@
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
     }
+
     function escapeRegex(s) {
       return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
+
     async function main() {
-      const res = await fetch('./data/awm_portals.json', { cache: 'no-store' });
-      if (!res.ok) throw new Error(`Failed to load portals.json (${res.status})`);
+      const statusEl = document.getElementById('status');
+
+      // Robust for GitHub Pages subpaths: resolves next to index.html
+      const jsonUrl = new URL('data/awm_portals.json', window.location.href);
+
+      statusEl.textContent = `Fetching data from ${jsonUrl.pathname} …`;
+
+      const res = await fetch(jsonUrl, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`Failed to load portals.json (${res.status}) from ${jsonUrl.href}`);
+
       const data = await res.json();
+      statusEl.textContent = `Loaded ${data.length} rows.`;
+
       const tbody = document.querySelector('#portals tbody');
-      tbody.innerHTML = data.map(row =>
-        `<tr><td>${escapeHtml(row.level)}</td><td>${escapeHtml(row.portal)}</td></tr>`
+      tbody.innerHTML = data.map(r =>
+        `<tr><td>${escapeHtml(r.level)}</td><td>${escapeHtml(r.portal)}</td></tr>`
       ).join('');
-      $('#portals').DataTable({
+
+      const table = $('#portals').DataTable({
         order: [[0, 'asc']],
         pageLength: 25,
         columnDefs: [{
@@ -71,45 +101,59 @@
             const n = parseInt(data, 10);
             return (type === 'sort' || type === 'type') && !isNaN(n) ? n : data;
           }
-        }],
-        initComplete: function () {
-          const api = this.api();
-          api.columns().every(function () {
-            const col = this;
-            const idx = col.index();
-            const select = document.querySelector(`select.col-filter[data-col="${idx}"]`);
-            if (!select) return;
-            const mode = select.getAttribute('data-mode') || 'exact';
-            // Build unique option list from full column data
-            const values = new Set(col.data().toArray().map(v => String(v)));
-            const sorted = Array.from(values).sort((a, b) => {
-              if (idx === 0) return (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0);
-              return a.localeCompare(b);
-            });
-            for (const v of sorted) {
-              const opt = document.createElement('option');
-              opt.value = v;
-              opt.textContent = v;
-              select.appendChild(opt);
-            }
-            select.addEventListener('change', () => {
-              const val = select.value;
-              if (!val) {
-                col.search('').draw();
-                return;
-              }
-              if (mode === 'contains') {
-                // regex=false => treat as plain substring match
-                col.search(val, false, true).draw();
-              } else {
-                col.search('^' + escapeRegex(val) + '$', true, false).draw();
-              }
-            });
-          });
+        }]
+      });
+
+      // Populate Level filter with unique levels (exact match)
+      const levelSet = new Set(table.column(0).data().toArray().map(x => String(x)));
+      const levels = Array.from(levelSet).sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
+      const levelSel = document.getElementById('filter-level');
+      for (const v of levels) {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v;
+        levelSel.appendChild(opt);
+      }
+
+      levelSel.addEventListener('change', () => {
+        const v = levelSel.value;
+        table.column(0).search(v ? `^${escapeRegex(v)}$` : '', true, false).draw();
+      });
+
+      // Populate Portals filter with unique portal strings (contains match)
+      const portalSet = new Set(table.column(1).data().toArray().map(x => String(x)));
+      const portals = Array.from(portalSet).sort((a, b) => a.localeCompare(b));
+      const portalSel = document.getElementById('filter-portals');
+      for (const v of portals) {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v;
+        portalSel.appendChild(opt);
+      }
+
+      // Make Portals dropdown type-searchable
+      $('#filter-portals').select2({
+        placeholder: 'All',
+        allowClear: true,
+        width: 'resolve',
+        matcher: function (params, data) {
+          const term = (params.term || '').toLowerCase();
+          if (!term) return data;
+          const text = (data.text || '').toLowerCase();
+          return text.includes(term) ? data : null; // contains-text within dropdown options
         }
       });
+
+      // Contains-text filter on the Portals column
+      $('#filter-portals').on('change', function () {
+        const v = this.value || '';
+        // regex=false => substring contains search
+        table.column(1).search(v, false, true).draw();
+      });
     }
+
     main().catch(err => {
+      document.getElementById('status').textContent = 'Error loading table (see details below).';
       document.body.insertAdjacentHTML('beforeend', `<pre>${escapeHtml(err.stack || err)}</pre>`);
     });
   </script>
