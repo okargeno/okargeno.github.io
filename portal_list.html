@@ -55,7 +55,7 @@
       return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
     async function main() {
-      const res = await fetch('./data/portals.json', { cache: 'no-store' });
+      const res = await fetch('./data/awm_portals.json', { cache: 'no-store' });
       if (!res.ok) throw new Error(`Failed to load portals.json (${res.status})`);
       const data = await res.json();
       const tbody = document.querySelector('#portals tbody');
